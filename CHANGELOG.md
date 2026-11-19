@@ -26,12 +26,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fMRIPrep's actual column names.
 - `find_probseg_file()` no longer probes a non-existent `ses-anat/anat` path;
   it checks the session `anat/` and the subject-level `anat/` instead.
+- `Detrending` with the `WMCSF` flavor now overwrites `white_matter` in place
+  (matching what it already did for `csf`). It used to write a new, unread `wm`
+  column, so the WM detrending silently never reached `TissueRegression`.
+- Pipeline `C`: restored the missing `CompCor` component count, which made
+  `TissueRegression` raise `UnboundLocalError` at run time.
+- `Scrubbing` `RMS` flavor: fixed the `cvec[2]` typo (used the `x` coordinate
+  instead of `z`) and write the score as a float instead of truncating it with
+  `%d`.
+- Queue mode: `qsub` output is decoded to `str`, so the job-id `grep` in
+  `checkProgress()` is well formed instead of interpolating a `bytes` repr.
+- Release-watch probe: a keyword now only counts as a confound prefix when it is
+  a whole underscore-delimited token, so unrelated literals such as `'outliers'`
+  no longer look like new prefixes.
 - README: removed the broken HCP example-output link.
 
 ### Added
 
 - `tests/test_core_modern_apis.py` statically guards the live modules against
   NumPy aliases and SciPy submodules that have been removed.
+- `scripts/smoke_wiring.py` now checks every pipeline references a known
+  operation with the arity its implementation expects.
 
 ## [0.2.0] - 2026-11-19
 

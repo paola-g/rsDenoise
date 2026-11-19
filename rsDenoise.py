@@ -253,7 +253,7 @@ def main():
   # launch array job (if there is something to do)
   if len(config.scriptlist)>0:
     JobID = fnSubmitJobArrayFromJobList()
-    config.joblist.append(JobID.split(b'.')[0])
+    config.joblist.append(JobID.split('.')[0])
     checkProgress(pause=60,verbose=False)
 
 

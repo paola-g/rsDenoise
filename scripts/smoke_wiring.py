@@ -36,8 +36,23 @@ def main() -> int:
         assert list(data.columns).index("a_comp_cor_00") < list(
             data.columns).index("a_comp_cor_01"), "component ordering failed"
 
+        _check_pipelines(fh)
+
         print(f"wiring OK: {bold.name}, {data.shape[1]} confounds columns")
     return 0
+
+
+def _check_pipelines(fh) -> None:
+    """Every pipeline must reference known operations with the arity their
+    implementation expects (a missing component count used to crash
+    pipeline 'C' at run time)."""
+    for name, operations in fh.config.operationDict.items():
+        for op, _order, params in operations:
+            assert op in fh.Hooks, f"{name}: unknown operation {op!r}"
+            if op == "TissueRegression" and params and params[0] == "CompCor":
+                assert isinstance(params[1], int), (
+                    f"{name}: TissueRegression CompCor needs an integer "
+                    f"component count, got {params!r}")
 
 
 if __name__ == "__main__":

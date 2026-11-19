@@ -54,3 +54,21 @@ def test_drift_detected_for_new_column_and_filename():
     assert "new_fancy_comp_" in drift["new_prefixes"]
     assert drift["filename_changed"] is True
     assert drift["requires_changes"] is True
+
+
+def test_keyword_only_counts_as_a_whole_token():
+    # Unrelated literals that merely contain a keyword substring must not be
+    # reported as new confound prefixes (which would open a spurious PR).
+    sources = {
+        "confounds_workflow": "\n".join([
+            "a = 'outliers'",            # contains 'outlier'
+            "b = 'n_aromatic'",          # contains 'aroma'
+            "c = f'motion_outlier{i:02d}'",
+        ]),
+        "confounds_interface": "",
+        "bold_base": "boldwf = Workflow(suffix='timeseries')",
+    }
+    found = extract_prefixes(sources)
+    assert "outliers" not in found
+    assert "n_aromatic" not in found
+    assert "motion_outlier" in found

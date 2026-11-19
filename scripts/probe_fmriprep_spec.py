@@ -29,6 +29,10 @@ PREFIX_RE = re.compile(r"header_prefix\s*=\s*['\"]([^'\"]+)['\"]")
 # fMRIPrep also builds names with f-strings, e.g. f'a_comp_cor_{i:02d}'.
 LITERAL_RE = re.compile(r"(?:f)?['\"]([a-z][a-z0-9_]*)")
 PREFIX_KEYWORDS = ("comp_cor", "outlier", "cosine", "aroma")
+# Match a keyword only as a whole underscore-delimited token, so unrelated
+# literals such as 'outliers' don't look like new confound prefixes.
+PREFIX_KEYWORD_RE = re.compile(
+    r"(?:^|_)(?:{0})(?:_|$)".format("|".join(map(re.escape, PREFIX_KEYWORDS))))
 SUFFIX_RE = re.compile(r"suffix\s*=\s*['\"](timeseries|regressors)['\"]")
 
 
@@ -55,7 +59,7 @@ def extract_prefixes(sources: dict[str, str]) -> list[str]:
         text = sources.get(name, "")
         found.update(PREFIX_RE.findall(text))
         for token in LITERAL_RE.findall(text):
-            if any(word in token for word in PREFIX_KEYWORDS):
+            if PREFIX_KEYWORD_RE.search(token):
                 found.add(token)
     return sorted(found)
 

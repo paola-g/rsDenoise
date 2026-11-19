@@ -254,7 +254,7 @@ config.operationDict = {
     'C': [ #Siegel et al. 2016 (SiegelB)
         ['VoxelNormalization',      1, ['demean']],
         ['Detrending',              2, ['poly', 1, 'wholebrain']],
-        ['TissueRegression',        3, ['CompCor', 'WMCSF', 'wholebrain']],
+        ['TissueRegression',        3, ['CompCor', 5, 'WMCSF', 'wholebrain']],
         ['TissueRegression',        3, ['GM', 'wholebrain']], 
         ['GlobalSignalRegression',  3, ['GS']],
         ['MotionRegression',        3, ['censoring']],
@@ -745,7 +745,7 @@ def fnSubmitJobArrayFromJobList():
     # execute the command
     cmdOut = check_output(strCommand, shell=True)
     config.scriptlist = []
-    return cmdOut.split()[2]    
+    return cmdOut.decode().split()[2]    
 
 ## 
 #  @brief Submit jobs with sge qsub
@@ -770,7 +770,7 @@ def fnSubmitToCluster(strScript, strJobFolder, strJobUID, resources):
         hFileID.write(strCommand+'\n')
     # execute the command
     cmdOut = check_output(strCommand, shell=True)
-    return cmdOut.split()[2]    
+    return cmdOut.decode().split()[2]    
 
 def prepareJobArrayFromJobList():
     config.tStamp = timestamp()
@@ -1468,7 +1468,7 @@ def Scrubbing(niiImg, flavor, masks, imgInfo):
                     for x in range(minx,maxx+1):    
                         idx = np.ravel_multi_index([x,y,z],[nRows,nCols,nSlices], order='F')
                         if maskAll[idx] > 0.5:
-                            cvec[0], cvec[1], cvec[2] = x*xdim, y*ydim, x*zdim
+                            cvec[0], cvec[1], cvec[2] = x*xdim, y*ydim, z*zdim
                             dist = linalg.norm(np.dot((aff1-aff2),cvec),2)
                             sumdistsq += dist*dist
                             nvox += 1
@@ -1476,7 +1476,7 @@ def Scrubbing(niiImg, flavor, masks, imgInfo):
         score = rmsdiff
         score[np.isnan(score)] = 0
         censored = np.where(score>thr)
-        np.savetxt(op.join(outpath(), '{}.txt'.format(flavor[0])), score, delimiter='\n', fmt='%d')
+        np.savetxt(op.join(outpath(), '{}.txt'.format(flavor[0])), score, delimiter='\n', fmt='%f')
     else:
         print('Wrong scrubbing flavor. Nothing was done')
         return niiImg[0],niiImg[1]
@@ -1643,7 +1643,7 @@ def Detrending(niiImg, flavor, masks, imgInfo):
                 y[i,:] = y[i,:]/np.max(y[i,:]) 
         else:
             print('Warning! Wrong detrend flavor. Nothing was done')
-        data['wm'] = regress(meanWM, nTRs, TR, y[1:nPoly,:].T, config.preWhitening)
+        data['white_matter'] = regress(meanWM, nTRs, TR, y[1:nPoly,:].T, config.preWhitening)
         data['csf'] = regress(meanCSF, nTRs, TR, y[1:nPoly,:].T, config.preWhitening)
         config.confounds = data
     elif flavor[2] == 'GM':
@@ -3029,7 +3029,7 @@ def runPredictionParJD(fcMatFile, dataFile, SM='PMAT24_A_CR', iPerm=[0], confoun
     if len(config.scriptlist)>0:
         # launch array job
         JobID = fnSubmitJobArrayFromJobList()
-        config.joblist.append(JobID.split(b'.')[0])
+        config.joblist.append(JobID.split('.')[0])
 
 ## 
 #  @brief Run preprocessing pipeline (output saved to file)
