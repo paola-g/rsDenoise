@@ -20,6 +20,10 @@ dependencies = [
     "statsmodels>=0.14",
 ]
 
+[project.scripts]
+# Console entry point; equivalent to running ``python rsDenoise.py``.
+rsdenoise = "rsDenoise:main"
+
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
 # Needed only by the archived HCP ICA-AROMA helpers in legacy_helpers/.

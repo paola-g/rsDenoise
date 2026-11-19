@@ -42,6 +42,13 @@ Example output for a HCP subject [here](https://caltech.box.com/s/t7zaw05wcnudl7
 ### Prerequisites
 The code depends on a set of python libraries, including: scipy, pandas, matplotlib, statsmodels, numpy, nibabel, nilearn, nipype, seaborn, scikit_learn. Install with `pip install -e .`. The archived legacy helpers additionally need `future` (`pip install -e .[legacy]`) and FSL.
 
+Installing also provides a `rsdenoise` console command that is equivalent to
+`python rsDenoise.py`:
+
+```bash
+rsdenoise -data <derivatives> -i subjects.txt -pipe A -o rsDenoise
+```
+
 ### fMRIPrep compatibility
 
 The pipeline targets the current stable fMRIPrep release (recorded in
