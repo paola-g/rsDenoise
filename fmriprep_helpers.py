@@ -55,8 +55,9 @@ from numpy.polynomial.legendre import Legendre
 from scipy import stats, linalg,signal
 import scipy.io as sio
 from scipy.spatial.distance import pdist, squareform
-from scipy.ndimage.morphology import binary_closing, binary_dilation, binary_erosion, binary_opening, generate_binary_structure
-from scipy.ndimage.filters import gaussian_filter1d
+from scipy.ndimage import (binary_closing, binary_dilation, binary_erosion,
+                           binary_opening, gaussian_filter1d,
+                           generate_binary_structure)
 import nipype.interfaces.fsl as fsl
 from subprocess import call, check_output, CalledProcessError, Popen
 import nibabel as nib
@@ -1823,7 +1824,7 @@ def VoxelNormalization(niiImg, flavor, masks, imgInfo):
             niiImg[1] = stats.zscore(niiImg[1], axis=1, ddof=1)
     elif flavor[0] == 'pcSigCh':
         meanImg = np.mean(niiImg[0],axis=1)[:,np.newaxis]
-        close0 = np.where(meanImg < 1e5*np.finfo(np.float).eps)[0]
+        close0 = np.where(meanImg < 1e5*np.finfo(float).eps)[0]
         if close0.shape[0] > 0:
             meanImg[close0,0] = np.max(np.abs(niiImg[0][close0,:]),axis=1)
             niiImg[0][close0,:] = niiImg[0][close0,:] + meanImg[close0,:]
@@ -1831,7 +1832,7 @@ def VoxelNormalization(niiImg, flavor, masks, imgInfo):
         niiImg[0][np.where(np.isnan(niiImg[0]))] = 0
         if niiImg[1] is not None:
             meanImg = np.mean(niiImg[1],axis=1)[:,np.newaxis]
-            close0 = np.where(meanImg < 1e5*np.finfo(np.float).eps)[0]
+            close0 = np.where(meanImg < 1e5*np.finfo(float).eps)[0]
             if close0.shape[0] > 0:
                 meanImg[close0,0] = np.max(np.abs(niiImg[1][close0,:]),axis=1)
                 niiImg[1][close0,:] = niiImg[1][close0,:] + meanImg[close0,:]
@@ -2229,7 +2230,7 @@ def getAllFC(subjectList,runs,sessions=None,parcellation=None,operations=None,ou
         discard_diagonal=True)
         if isCifti:
             ext = '.dtseries.nii'
-        if isGifti:
+        elif isGifti:
             ext = '.func.gii'
         else:
             ext = '.nii.gz'

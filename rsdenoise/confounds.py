@@ -33,7 +33,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "rot_x": ("rot_x", "rot-x", "motion_rot_x"),
     "rot_y": ("rot_y", "rot-y", "motion_rot_y"),
     "rot_z": ("rot_z", "rot-z", "motion_rot_z"),
-    "aroma": ("aroma_motion__*",),
+    "aroma": ("aroma_motion_*",),
     "a_comp_cor": ("a_comp_cor_*",),
     "t_comp_cor": ("t_comp_cor_*",),
     "cosine": ("cosine*", "cos_*"),
@@ -45,7 +45,7 @@ MOTION_COLUMNS = ("trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z")
 COMPONENT_PREFIXES = (
     "a_comp_cor_", "c_comp_cor_", "w_comp_cor_", "t_comp_cor_",
     "edge_comp_", "cosine", "non_steady_state_outlier", "motion_outlier",
-    "aroma_motion__",
+    "aroma_motion_", "aroma_orth_motion_",
 )
 
 

@@ -40,7 +40,7 @@
       "non_steady_state_outlier",
       "motion_outlier"
     ],
-    "removed_prefixes": ["aroma_motion__"]
+    "removed_prefixes": ["aroma_motion_"]
   },
   "fmripost_aroma": {
     "reason": "ICA-AROMA was removed from fmriprep in 23.1.0; noise components are now produced by the separate fmripost-aroma BIDS App",

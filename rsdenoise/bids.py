@@ -218,7 +218,11 @@ def find_probseg_file(data_dir: str | os.PathLike, subject: str,
     """Find a tissue probability segmentation for any fmriprep resolution."""
     root = resolve_data_root(data_dir)
     sub_dir = _subject_dir(root, subject, session)
-    anat_dirs = [sub_dir / "anat", sub_dir / "ses-anat" / "anat", sub_dir]
+    # probsegs live in the session's anat/ when a session is given; some
+    # derivatives also keep a session-less subject-level anat/.
+    anat_dirs = [sub_dir / "anat",
+                 _subject_dir(root, subject, None) / "anat",
+                 sub_dir]
     matches: list[Path] = []
     for directory in anat_dirs:
         if directory.is_dir():

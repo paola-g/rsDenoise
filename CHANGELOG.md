@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **Modern-stack compatibility of the shared core**: replaced the NumPy alias
+  `np.float` (removed in NumPy 2) with `float`, which fixes the `pcSigCh`
+  voxel-normalisation flavor, and switched the deprecated
+  `scipy.ndimage.morphology` / `scipy.ndimage.filters` imports to the top-level
+  `scipy.ndimage` namespace (removed in SciPy 2).
+- `getAllFC()` now selects the correct output extension for CIFTI input; an
+  `if`/`else` mistake made it fall back to `.nii.gz`.
+- Corrected the fmripost-aroma confound prefix to `aroma_motion_` (single
+  underscore) in `rsdenoise/confounds.py` and `fmriprep_spec.json`, matching
+  fMRIPrep's actual column names.
+- `find_probseg_file()` no longer probes a non-existent `ses-anat/anat` path;
+  it checks the session `anat/` and the subject-level `anat/` instead.
+- README: removed the broken HCP example-output link.
+
+### Added
+
+- `tests/test_core_modern_apis.py` statically guards the live modules against
+  NumPy aliases and SciPy submodules that have been removed.
 
 ## [0.2.0] - 2026-11-19
 

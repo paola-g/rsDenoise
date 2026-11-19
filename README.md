@@ -494,9 +494,6 @@ data/                        # example subject ID lists
   multimodal data resource for exploring social cognition and decision-making.*
   Scientific Data. 2022;9(1):138.
 
-Example output for an HCP subject is available
-[here](https://caltech.box.com/s/t7zaw05wcnudl7b2jvn69wa2fvzlcc4j).
-
 ---
 
 ## Changelog
