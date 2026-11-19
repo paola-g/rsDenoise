@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `xml.etree.cElementTree` with `xml.etree.ElementTree`.
 - `getAllFC()` now selects the correct output extension for CIFTI input; an
   `if`/`else` mistake made it fall back to `.nii.gz`.
+- `TemporalFiltering` with the Butterworth flavor now filters the
+  edge-padded volumetric companion (CIFTI input) instead of the unpadded
+  array. The old code built the mirror padding and then discarded it, so the
+  volume lost `2*NR` timepoints and no longer matched the surface series.
 - Corrected the fmripost-aroma confound prefix to `aroma_motion_` (single
   underscore) in `rsdenoise/confounds.py` and `fmriprep_spec.json`, matching
   fMRIPrep's actual column names.
