@@ -1,271 +1,505 @@
+<div align="center">
+
 # rsDenoise
-A python-based, customisable and extensible pipeline for resting-state fMRI data.<br>
-Authors: Paola Galdi (paola.galdi@gmail.com) and Julien Dubois (jcrdubois@gmail.com).<br>
-The software is provided as is without warranty of any kind.
 
+**A configurable, extensible pipeline for resting-state fMRI denoising and functional connectivity.**
 
-This configurable pipeline for the processing of resting-state fMRI was originally designed to work with data from the Human Connectome Project (and hence the [HCP directory structure](https://wiki.humanconnectome.org/display/PublicData/How+To+Handle+Downloaded+HCP+Data "HCP directory structure")). The original code is still available [here](https://github.com/adolphslab/HCP_MRI-behavior "HCP_MRI-behavior"). The pipeline was first updated to work with data that are converted to an HCP-like format, using [ciftify](https://github.com/edickie/ciftify "ciftify"), and later extended to work with data minimally preprocessed with [fmriprep](https://fmriprep.org/en/stable/ "fmriprep"). 
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://github.com/paola-g/rsDenoise/actions/workflows/tests.yml/badge.svg?branch=refactor)](https://github.com/paola-g/rsDenoise/actions/workflows/tests.yml)
+[![fMRIPrep release watch](https://github.com/paola-g/rsDenoise/actions/workflows/fmriprep-release-watch.yml/badge.svg?branch=refactor)](https://github.com/paola-g/rsDenoise/actions/workflows/fmriprep-release-watch.yml)
+[![fMRIPrep](https://img.shields.io/badge/fMRIPrep-25.2.7-blueviolet.svg)](https://fmriprep.org/)
 
-The pipeline works with both volumetric (NIFTI) and surface data (either CIFTI or GIFTI).
+*Authors: Paola Galdi ([paola.galdi@gmail.com](mailto:paola.galdi@gmail.com)) · Julien Dubois ([jcrdubois@gmail.com](mailto:jcrdubois@gmail.com))*
 
-### Helper modules (shared core + compatibility shims)
+</div>
 
-All three historical import paths still work, but the implementation now lives in a
-single shared core:
+> [!WARNING]
+> The software is provided **as is**, without warranty of any kind.
 
-- `fmriprep_helpers.py` — the shared core used by the CLI, the example script and
-  both shims. Works directly with fMRIPrep outputs, with or without FreeSurfer.
-- `fmriprepciftify_helpers.py` — compatibility shim re-exporting the shared core.
-- `HCP_helpers.py` — compatibility shim re-exporting the shared core.
+`rsDenoise` turns minimally preprocessed resting-state fMRI into denoised time
+series and functional-connectivity matrices, using a pipeline you describe as
+data rather than code. It was originally built for the Human Connectome Project
+([HCP directory structure](https://wiki.humanconnectome.org/display/PublicData/How+To+Handle+Downloaded+HCP+Data)),
+was later adapted to HCP-like data converted with
+[ciftify](https://github.com/edickie/ciftify), and today works directly with
+[**fMRIPrep**](https://fmriprep.org/en/stable/) derivatives. Both volumetric
+(NIfTI) and surface (CIFTI/GIFTI) data are supported.
 
-The original, pre-consolidation forks are archived under `legacy_helpers/` for
-reference. Their handful of fork-specific functions (task design, partial
-correlation helpers, the old in-pipeline ICA-AROMA implementation) are exposed
-**lazily** by the shims — they depend on FSL and old SciPy/NumPy APIs and are only
-loaded if explicitly requested. New analyses should use the shared core.
+The original implementation is preserved at
+[adolphslab/HCP_MRI-behavior](https://github.com/adolphslab/HCP_MRI-behavior).
 
-`rsdenoise/` holds the lightweight, dependency-free compatibility layer
-(BIDS/fMRIPrep file discovery, confounds parsing and spec tracking). It is what
-the automated compatibility tests exercise.
+---
 
-The IPython notebooks provide a few examples of use (more can be found here: [HCP_MRI-behavior](https://github.com/adolphslab/HCP_MRI-behavior "HCP_MRI-behavior"))
-A minimal script to launch the pipeline is provided in `runPipeline_example.py`. A command line wrapper is provided in `rsDenoise.py`.
-Example output for a HCP subject [here](https://caltech.box.com/s/t7zaw05wcnudl7b2jvn69wa2fvzlcc4j "outputs,preGLM0 pipeline").
+## Table of contents
 
-## References
-- Dubois J, Galdi P, Han Y, Paul LK, Adolphs R. Resting-state functional brain connectivity best predicts the personality dimension of openness to experience. Personality neuroscience. 2018 Jul;1:e6.
-- Dubois J, Galdi P, Paul LK, Adolphs R. A distributed brain network predicts general intelligence from resting-state human neuroimaging data. Philosophical Transactions of the Royal Society B: Biological Sciences. 2018 Sep 26;373(1756):20170284.
-- Kliemann D, Adolphs R, Armstrong T, Galdi P, Kahn DA, Rusch T, Enkavi AZ, Liang D, Lograsso S, Zhu W, Yu R. Caltech Conte Center, a multimodal data resource for exploring social cognition and decision-making. Scientific Data. 2022 Mar 31;9(1):138.
+- [Why rsDenoise](#why-rsdenoise)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [fMRIPrep compatibility](#fmriprep-compatibility)
+- [Configuring a pipeline](#configuring-a-pipeline)
+- [Pipeline operations reference](#pipeline-operations-reference)
+- [Advanced functionality](#advanced-functionality)
+- [Architecture](#architecture)
+- [Development, testing and CI](#development-testing-and-ci)
+- [Project layout](#project-layout)
+- [References](#references)
+- [Changelog](#changelog)
 
-## Overview
+---
 
-### Prerequisites
-The code depends on a set of python libraries, including: scipy, pandas, matplotlib, statsmodels, numpy, nibabel, nilearn, nipype, seaborn, scikit_learn. Install with `pip install -e .`. The archived legacy helpers additionally need `future` (`pip install -e .[legacy]`) and FSL.
+## Why rsDenoise
 
-Installing also provides a `rsdenoise` console command that is equivalent to
-`python rsDenoise.py`:
+- 🧩 **Pipelines as data.** A pipeline is an ordered list of operations, so you
+  can build, share and re-run a denoising strategy without writing code.
+- 🧠 **Modern fMRIPrep first.** Inputs and confounds are *discovered* from BIDS
+  entities, so current and older fMRIPrep layouts both work.
+- 🔀 **Surface or volume.** CIFTI, GIFTI and NIfTI inputs are handled uniformly.
+- 🧪 **Tested.** A dependency-light compatibility suite runs on every push, and a
+  weekly workflow watches fMRIPrep releases for breaking changes.
+- 📈 **Beyond denoising.** Functional connectivity (parcel-wise, seed-based or
+  vertex/voxel-wise), QC plots and XML reports are built in.
+
+---
+
+## Installation
+
+**Requirements:** Python ≥ 3.10. Runtime dependencies (installed automatically)
+are `numpy`, `scipy`, `pandas`, `matplotlib`, `nibabel`, `nilearn`, `nipype`,
+`scikit-learn`, `seaborn` and `statsmodels`.
+
+Install from a checkout:
 
 ```bash
-rsdenoise -data <derivatives> -i subjects.txt -pipe A -o rsDenoise
+pip install -e .            # editable install for development
+# or
+pip install .               # regular install
 ```
 
-### fMRIPrep compatibility
+Optional extras:
 
-The pipeline targets the current stable fMRIPrep release (recorded in
-`rsdenoise/fmriprep_spec.json`; currently 25.2.7). Input files and confounds are
-**discovered**, not reconstructed from hard-coded filename templates, so both
-modern (`*_desc-confounds_timeseries.tsv`) and older
-(`*_desc-confounds_regressors.tsv`) derivatives are handled. Confounds columns
-are normalised by name and numbered component columns are ordered by their
-numeric suffix rather than by TSV position.
+```bash
+pip install -e ".[test]"    # pytest, for the compatibility suite
+pip install -e ".[legacy]"  # `future`, only needed by the archived legacy helpers
+```
 
-Named CompCor families written by recent fMRIPrep (`a_`, `c_`, `w_`,
-`edge_comp_*`), along with high-pass and spike regressors, are recognised. If a
-required family is absent (for example `a_comp_cor_*` when CompCor was not
-enabled), the failing operation raises a descriptive error instead of silently
-using an empty design matrix.
+> [!NOTE]
+> **Cluster / queue users.** Running pipelines through a Sun Grid Engine cluster
+> (`config.queue = True`) additionally needs SGE (`qsub`/`qstat`) and FSL
+> (`$FSLDIR`). The archived ICA-AROMA helpers shell out to FSL tools.
 
-#### ICA-AROMA
+---
+
+## Quick start
+
+### Command line
+
+The recommended entry point is the `rsDenoise` CLI (also installed as the
+`rsdenoise` console command):
+
+```bash
+rsdenoise \
+  -data /path/to/fmriprep/derivatives \
+  -i    subjects.txt \
+  -pipe A \
+  -o    rsDenoise \
+  -cifti
+```
+
+`-data`, `-i`, `-pipe` and `-o` are required; see `rsdenoise --help` for the
+full flag list (spaces, surfaces, smoothing, parcellation, seed- and
+voxel-wise connectivity). `subjects.txt` holds one subject ID per line (a
+`sub-` prefix is added automatically if missing).
+
+### From Python
+
+`runPipeline_example.py` is a minimal in-code example:
+
+```python
+from fmriprep_helpers import *
+
+config.DATADIR = "/path/to/fmriprep/derivatives"
+config.subject = "sub-0040"
+config.Operations = config.operationDict["A"]
+config.isCifti = True
+config.queue = False          # run locally
+config.outDir = "rsDenoise"
+
+runPipelinePar(launchSubproc=True, do_makeGrayPlot=True, do_computeFC=True)
+```
+
+### Notebooks
+
+The IPython notebooks demonstrate common workflows. `fmriprep_YALE.ipynb` and
+`FC_plots_Conte.ipynb` are maintained; the remaining `Conte_*.ipynb` files
+predate the shared-core refactor and are kept for historical reference.
+
+---
+
+## fMRIPrep compatibility
+
+The pipeline targets the current stable fMRIPrep release, recorded in
+[`rsdenoise/fmriprep_spec.json`](rsdenoise/fmriprep_spec.json) (currently
+**25.2.7**). Rather than reconstructing filenames from a hard-coded template,
+inputs are **discovered by BIDS entities** and ranked, so multiple fMRIPrep
+generations can be read side by side.
+
+| Item | Modern | Older / still supported |
+| --- | --- | --- |
+| Confounds file | `*_desc-confounds_timeseries.tsv` | `*_desc-confounds_regressors.tsv`, legacy names |
+| Volumetric BOLD | `*_space-<space>_desc-preproc_bold.nii.gz` | ciftify / older fMRIPrep names |
+| Surface BOLD | `*_space-fsLR_den-91k_bold.dtseries.nii`, `*_hemi-L*_bold.func.gii` | ciftify GIFTI names |
+
+Confounds are looked up **by column name** (with aliases across releases) and
+numbered components are ordered by their **numeric suffix** rather than by TSV
+position. Recognised families include `a_`/`c_`/`w_`/`t_comp_cor_*`,
+`edge_comp_*`, `cosine*`, `non_steady_state_outlier*` and `motion_outlier*`.
+
+> [!IMPORTANT]
+> If a required regressor family is absent — for example `a_comp_cor_*` when
+> CompCor was not enabled — the failing operation raises a **descriptive error**
+> instead of silently building an empty design matrix.
+
+You can still force a specific file with `config.fmriFileTemplate`, using the
+`#subjectID#`, `#fMRIsession#` and `#fMRIrun#` placeholders. When present, it
+takes precedence over discovery.
+
+### ICA-AROMA via `fmripost-aroma`
 
 fMRIPrep removed ICA-AROMA in 23.1.0. The `ICA-AROMA` motion-regression flavor
-is still supported, but it now consumes noise components from the standalone
-[fmripost-aroma](https://fmripost-aroma.readthedocs.io/) BIDS App:
+is still supported, but it now consumes noise components produced by the
+standalone [fmripost-aroma](https://fmripost-aroma.readthedocs.io/) BIDS App:
 
-1. Run current fMRIPrep with `--cifti-output` (or the desired volume space).
+1. Run current fMRIPrep with `--cifti-output` (or the volume space you need).
 2. Run fmripost-aroma on those derivatives.
-3. Point `config.DATADIR` at the fmripost-aroma derivatives directory.
+3. Point `config.DATADIR` at the **fmripost-aroma** derivatives directory and
+   select the `ICA-AROMA` motion flavor.
 
 The shared core discovers `*_desc-aroma_timeseries.tsv` and the
-`*_desc-{aggr,nonaggr,orthaggr}Denoised_bold.nii.gz` files automatically. The
-old in-pipeline AROMA implementation remains available only through the lazily
+`*_desc-{aggr,nonaggr,orthaggr}Denoised_bold.nii.gz` files automatically. The old
+in-pipeline AROMA implementation remains available only through the lazily
 loaded `HCP_helpers` archive.
 
-### Development and automated compatibility checks
+---
 
-Run the synthetic-fixture test suite with:
+## Configuring a pipeline
 
+Preprocessing is a sequence of **operations**. Every operation is a function
+with the following signature:
+
+```python
+def OperationName(niiImg, flavor, masks, imgInfo):
+    ...
 ```
-python -m pip install -e .[test]
-python -m pytest -q
-```
 
-GitHub Actions runs these tests on every push/PR and performs a weekly
-release-watch: it polls the stable fMRIPrep version and its machine-readable
-confound definitions, generates fresh synthetic fixtures, and opens a review PR
-with a compatibility report when output naming or columns drift. See
-`.github/workflows/`.
+| Argument | Meaning |
+| --- | --- |
+| `niiImg` | `[data, volData]`. For NIfTI inputs `volData` is `None`; for CIFTI inputs `data` is the CIFTI array and `volData` the volumetric array. Load with `load_img()`. |
+| `flavor` | The operation's parameter list (see the [reference](#pipeline-operations-reference)). |
+| `masks` | Output of `makeTissueMasks()`: `[whole brain, white matter, CSF, gray matter]`. |
+| `imgInfo` | `[rows, columns, slices, time points, affine, TR]`, retrievable with `load_img()`. |
 
-### Preprocessing Pipeline
-Preprocessing is performed by executing a sequence of steps or operations, each of which corresponds to a function in the helpers file. There are 7 available operations: [Voxel Normalization](#voxel-normalization), [Detrending](#detrending), [Motion Regression](#motion-regression), [Scrubbing](#voxel-normalization), [Tissue Regression](#tissue-regression), [Global Signal Regression](#global-signal-regression) and [Temporal Filtering](#temporal-filtering). The corresponding functions are built using the following template:
+A pipeline is a list of `[operation_name, order, params]` entries:
 
-` def OperationName(niiImg, flavor, masks, imgInfo):`
-
-* <b>niiImg</b> it is a list of two elements `[data,volData]`. If the file to be processed is a Nifti file, the variable `data` contains Nifti data and the variable `volData` is `None`. If the input file is a Cifti file, the variable `data` contains Cifti data and the variable `volData` contains volumetric data. Image data can be loaded with function `load_img()`.
-* <b>flavor</b> is a list containing the Operation parameters (detailed in the [following section](#pipeline-operations)).
-* <b>masks</b> is the output of the function `makeTissueMasks()`, a list of four elements corresponding to 1) whole brain mask, 2) white matter mask, 3) cerebrospinal fluid mask and 4) gray matter mask. 
-* <b>imgInfo</b> is a list of 6 elements corresponding to 1) no. of rows in a slice, 2) no. of columns in a slice, 3) no. of slices, 4) no. of time points, 5) the affine matrix and 6) repetion time. These data can be retrieved with function `load_img()`.
-
-A preprocessing pipeline can be fully described with the following data structure:
-
-```
+```python
 [
-    ['Operation1',  1, [param1]],
-    ['Operation2',  2, [param1, param2, param3]],
-    ['Operation3',  3, [param1, param2]],
-    ['Operation4',  4, [param1]],
-    ['Operation5',  5, [param1, param2]],
-    ['Operation6',  6, [param1, param2, param3]],
-    ['Operation7',  7, [param]]
+    ['Operation1', 1, [param1]],
+    ['Operation2', 2, [param1, param2, param3]],
+    ['Operation3', 3, [param1, param2]],
+    ['Operation4', 4, [param1]],
+    ['Operation5', 5, [param1, param2]],
+    ['Operation6', 6, [param1, param2, param3]],
+    ['Operation7', 7, [param]],
 ]
 ```
-It is a list of structures. Each structure is a list of 3 elements:
-1. The operation name.
-2. The operation order.
-3. The list of parameters for the specific operation.
 
-Operations are executed following the operation order specified by the user. Note that in case of regression operations, a single regression step combining multiple regressors (e.g., tissue regressors and global signal regressor) can be requested by assigning the same order to all regression steps.
+Operations run in ascending `order`. **Regression operations that share the same
+order are merged into a single regression step** — that is how you combine, say,
+tissue and global-signal regressors in one design matrix.
 
-There are several pipelines already specified helpers file:
+Several named pipelines ship in `config.operationDict`:
 
-```
+```python
 config.operationDict = {
-    'A': [ #Finn et al. 2015
+    'A': [  # Finn et al. 2015
         ['VoxelNormalization',      1, ['zscore']],
         ['Detrending',              2, ['legendre', 3, 'WMCSF']],
         ['TissueRegression',        3, ['WMCSF', 'GM']],
         ['MotionRegression',        4, ['R dR']],
         ['TemporalFiltering',       5, ['Gaussian', 1]],
-        ['Detrending',              6, ['legendre', 3 ,'GM']],
-        ['GlobalSignalRegression',  7, ['GS']]
-        ],
-    'B': [ #Satterthwaite et al. 2013 (Ciric7)
+        ['Detrending',              6, ['legendre', 3, 'GM']],
+        ['GlobalSignalRegression',  7, ['GS']],
+    ],
+    'B': [  # Satterthwaite et al. 2013 (Ciric7)
         ['VoxelNormalization',      1, ['demean']],
         ['Detrending',              2, ['poly', 2, 'wholebrain']],
         ['TemporalFiltering',       3, ['Butter', 0.01, 0.08]],
         ['MotionRegression',        4, ['R dR R^2 dR^2']],
         ['TissueRegression',        4, ['WMCSF+dt+sq', 'wholebrain']],
         ['GlobalSignalRegression',  4, ['GS+dt+sq']],
-        ['Scrubbing',               4, ['RMS', 0.25]]
-        ],
-    'C': [ #Siegel et al. 2016 (SiegelB)
+        ['Scrubbing',               4, ['RMS', 0.25]],
+    ],
+    'C': [  # Siegel et al. 2016 (SiegelB)
         ['VoxelNormalization',      1, ['demean']],
         ['Detrending',              2, ['poly', 1, 'wholebrain']],
         ['TissueRegression',        3, ['CompCor', 5, 'WMCSF', 'wholebrain']],
-        ['TissueRegression',        3, ['GM', 'wholebrain']], 
+        ['TissueRegression',        3, ['GM', 'wholebrain']],
         ['GlobalSignalRegression',  3, ['GS']],
         ['MotionRegression',        3, ['censoring']],
-        ['Scrubbing',               3, ['FD+DVARS', 0.25, 5]], 
-        ['TemporalFiltering',       4, ['Butter', 0.009, 0.08]]
-        ],
-        ...
-    }
+        ['Scrubbing',               3, ['FD+DVARS', 0.25, 5]],
+        ['TemporalFiltering',       4, ['Butter', 0.009, 0.08]],
+    ],
+    # ... 12 more
+}
 ```
 
-### Pipeline Operations
-Custom operations can be provided by users, using the template detailed above. New functions need to be added to the Hooks data structure in the helpers file:
+### Custom operations
+
+Add your function to the `Hooks` mapping in the core and reference it by name in
+a pipeline:
+
+```python
+Hooks = {
+    'MotionRegression':       MotionRegression,
+    'Scrubbing':              Scrubbing,
+    'TissueRegression':       TissueRegression,
+    'Detrending':             Detrending,
+    'TemporalFiltering':      TemporalFiltering,
+    'GlobalSignalRegression': GlobalSignalRegression,
+    'VoxelNormalization':     VoxelNormalization,
+    'newFunction':            newFunction,
+}
+```
+
+---
+
+## Pipeline operations reference
+
+There are seven built-in operations: [Voxel Normalization](#voxel-normalization),
+[Detrending](#detrending), [Motion Regression](#motion-regression),
+[Scrubbing](#scrubbing), [Tissue Regression](#tissue-regression),
+[Global Signal Regression](#global-signal-regression) and
+[Temporal Filtering](#temporal-filtering).
+
+### Voxel Normalization
+
+- **`zscore`** — convert each voxel's time course to a z-score (remove mean,
+  divide by standard deviation).
+- **`demean`** — subtract the mean from each voxel's time series.
+- **`pcSigCh`** — convert each voxel's time course to % signal change (remove
+  mean, divide by mean, multiply by 100).
+
+```python
+['VoxelNormalization', 1, ['zscore']]
+```
+
+### Detrending
+
+- **`poly`** — polynomial regressors up to the specified order.
+  1. Polynomial order.
+  2. Tissue: `'WMCSF'` or `'GM'`.
+- **`legendre`** — Legendre polynomials up to the specified order.
+  1. Polynomial order.
+  2. Tissue: `'WMCSF'` or `'GM'`.
+
+```python
+['Detrending', 2, ['poly', 3, 'GM']]
+```
+
+### Motion Regression
+
+> [!NOTE]
+> `R = [X Y Z pitch yaw roll]`. If temporal filtering has already been performed,
+> the motion regressors are filtered too. If scrubbing was requested, a regressor
+> is added for every volume to be censored; the `censoring` option performs only
+> scrubbing.
+
+- **`R`** — realignment parameters (R).
+- **`R dR`** — R and their temporal derivatives (dR).
+- **`R R^2`** — R and their quadratic terms.
+- **`R dR R^2 dR^2`** — R with derivatives, quadratic terms and squared derivatives.
+- **`R R^2 R-1 R-1^2`** — R at time *t* and *t-1*, with their square terms.
+- **`R R^2 R-1 R-1^2 R-2 R-2^2`** — R at *t*, *t-1* and *t-2*, with square terms.
+- **`censoring`** — a unit impulse per volume tagged for scrubbing.
+- **`ICA-AROMA`** — ICA noise components as regressors (see
+  [ICA-AROMA via fmripost-aroma](#ica-aroma-via-fmripost-aroma)).
+
+```python
+['MotionRegression', 3, ['R dR']]
+```
+
+### Scrubbing
+
+> [!NOTE]
+> This step only *flags* volumes; they are regressed out in the Motion
+> Regression step. Uncensored segments shorter than 5 contiguous volumes are
+> flagged for removal as well.
+
+- **`FD`**
+  1. Framewise-displacement threshold (mm).
+  2. Number of adjacent volumes to exclude (optional).
+- **`DVARS`**
+  1. DVARS threshold.
+  2. Number of adjacent volumes to exclude (optional).
+- **`FD+DVARS`**
+  1. Framewise-displacement threshold (mm).
+  2. Threshold *t* such that volumes with DVARS greater than (100 + *t*)% of the
+     run median DVARS are flagged (as in Siegel et al., *Cerebral Cortex*, 2016).
+  3. Number of adjacent volumes to exclude (optional).
+- **`RMS`**
+  1. Root-mean-square displacement threshold (mm).
+  2. Number of adjacent volumes to exclude (optional).
+
+```python
+['Scrubbing', 4, ['FD+DVARS', 0.25, 5]]
+```
+
+### Tissue Regression
+
+Each flavor takes one argument specifying whether regression is performed on the
+gray-matter signal (`'GM'`) or the whole-brain signal (`'wholebrain'`).
+
+- **`GM`** — gray-matter signal as a regressor.
+- **`WM`** — white-matter signal as a regressor.
+- **`WMCSF`** — white-matter and CSF signals as regressors.
+- **`WMCSF+dt`** — WM and CSF signals with their derivatives.
+- **`WMCSF+dt+sq`** — WM and CSF signals with derivatives and quadratic terms.
+- **`CompCor`** — PCA-based components (Behzadi et al., 2007).
+  1. Number of components to compute for the specified tissue mask.
+  2. Mask: a single `'WMCSF'` mask, or separate `'WM+CSF'` masks.
+  3. `'GM'` or `'wholebrain'`.
+
+```python
+['TissueRegression', 5, ['CompCor', 5, 'WMCSF', 'wholebrain']]
+```
+
+### Global Signal Regression
+
+- **`GS`** — global signal as a regressor.
+- **`GS+dt`** — global signal with its derivatives.
+- **`GS+dt+sq`** — global signal with derivatives and quadratic terms.
+
+```python
+['GlobalSignalRegression', 6, ['GS+dt+sq']]
+```
+
+### Temporal Filtering
+
+> [!NOTE]
+> If scrubbing was requested, censored volumes are replaced by linear
+> interpolation.
+
+- **`Butter`** — Butterworth band-pass filter.
+  1. High-pass threshold.
+  2. Low-pass threshold.
+- **`Gaussian`** — low-pass Gaussian smoothing.
+  1. Standard deviation.
+- **`DCT`** — discrete cosine transform regressors for temporal filtering.
+  1. High-pass threshold.
+  2. Low-pass threshold.
+
+```python
+['TemporalFiltering', 7, ['Butter', 0.009, 0.08]]
+```
+
+---
+
+## Advanced functionality
+
+- **QC plots** — framewise-displacement trace and grayplot.
+- **XML reports** — per-run provenance and QC summaries.
+- **SGE support** — submit pipelines as job arrays on a Sun Grid Engine cluster.
+- **Functional connectivity** — parcel-wise, seed-based, or vertex/voxel-wise
+  (`-vFC`).
+- **Score prediction** — predict individual scores from connectivity matrices.
+
+---
+
+## Architecture
+
+The three historical import paths still work, but the implementation now lives in
+a **single shared core**:
+
+| Module | Role |
+| --- | --- |
+| `fmriprep_helpers.py` | **Shared core.** Used by the CLI, the example script and both shims. Works directly with fMRIPrep outputs, with or without FreeSurfer. |
+| `fmriprepciftify_helpers.py` | Compatibility **shim** re-exporting the shared core. |
+| `HCP_helpers.py` | Compatibility **shim** re-exporting the shared core. |
+
+Both shims share the core's `config` object and expose a handful of
+fork-specific functions **lazily** (task design, partial-correlation helpers and
+the old in-pipeline ICA-AROMA implementation). Those depend on FSL and legacy
+SciPy/NumPy APIs, so they are only imported when explicitly requested. The
+original pre-consolidation forks are archived under `legacy_helpers/` for
+reference — **new analyses should use the shared core.**
+
+[`rsdenoise/`](rsdenoise) is a lightweight, dependency-free compatibility layer
+that the automated tests exercise directly:
+
+- `bids.py` — BIDS-entity discovery of BOLD / confounds / aseg / probseg files.
+- `confounds.py` — TSV parsing, alias canonicalisation, component ordering.
+- `spec.py` + `fmriprep_spec.json` — the pinned compatibility spec and history.
+
+---
+
+## Development, testing and CI
+
+```bash
+python -m pip install -e ".[test]"
+python -m pytest -q          # 23 tests, stdlib-only by design
+python -m scripts.smoke_wiring   # full-dependency discovery/confounds smoke test
+```
+
+GitHub Actions provides two workflows:
+
+- **`tests`** — unit tests plus a full-dependency import/wiring smoke test on
+  every push and pull request.
+- **`fmriprep release watch`** — weekly. It polls the stable fMRIPrep version
+  from PyPI and parses the pinned fMRIPrep source for confound-name drift,
+  regenerates synthetic fixtures, runs the suite, and opens a **review PR** with
+  a compatibility report when naming or columns change. The PR is a proposal,
+  not an auto-merge.
+
+Synthetic fixtures live under `tests/fixtures/` (gitignored) and are regenerated
+by the tests — do not commit them.
+
+---
+
+## Project layout
 
 ```
-Hooks={
-   'MotionRegression'       : MotionRegression,
-   'Scrubbing'              : Scrubbing,
-   'TissueRegression'       : TissueRegression,
-   'Detrending'             : Detrending,
-   'TemporalFiltering'      : TemporalFiltering, 
-   'GlobalSignalRegression' : GlobalSignalRegression, 
-   'VoxelNormalization'     : VoxelNormalization,
-   'newFunction'            : newFunction,
-   }
+rsDenoise.py                 # command-line interface (also `rsdenoise`)
+runPipeline_example.py       # minimal in-code example
+fmriprep_helpers.py          # shared core
+fmriprepciftify_helpers.py   # compatibility shim
+HCP_helpers.py               # compatibility shim
+rsdenoise/                   # dependency-free compatibility layer + pinned spec
+legacy_helpers/              # archived pre-consolidation forks (reference only)
+scripts/                     # release-watch probe, fixture generator, smoke test
+tests/                       # synthetic-fixture compatibility suite
+.github/workflows/           # tests + fMRIPrep release watch
+data/                        # example subject ID lists
 ```
 
-In the following we detail those included in the helpers file.
+---
 
-#### Voxel Normalization
-* <b>zscore:</b> convert each voxel’s time course to z-score (remove mean, divide by standard deviation).
-* <b>demean:</b> substract the mean from each voxel's time series.
-* <b>pcSigCh:</b> convert each voxel’s time course to % signal change (remove mean, divide by mean, multiply by 100)
+## References
 
-Example: `['VoxelNormalization',      1, ['zscore']]`
-#### Detrending
-* <b>poly:</b> polynomial regressors up to specified order.
-	1. Specify polynomial order.
-	2. Specify tissue, one of 'WMCSF' or 'GM'.
-* <b>legendre:</b> Legendre polynomials up to specified order.
-	1. Specify polynomial order 
-	2. Specify tissue, one of 'WMCSF' or 'GM'.
+- Dubois J, Galdi P, Han Y, Paul LK, Adolphs R. *Resting-state functional brain
+  connectivity best predicts the personality dimension of openness to
+  experience.* Personality Neuroscience. 2018 Jul;1:e6.
+- Dubois J, Galdi P, Paul LK, Adolphs R. *A distributed brain network predicts
+  general intelligence from resting-state human neuroimaging data.*
+  Philosophical Transactions of the Royal Society B. 2018;373(1756):20170284.
+- Kliemann D, Adolphs R, Armstrong T, Galdi P, et al. *Caltech Conte Center, a
+  multimodal data resource for exploring social cognition and decision-making.*
+  Scientific Data. 2022;9(1):138.
 
-Example: `['Detrending',      2, ['poly', 3, 'GM']]`
-#### Motion Regression 
-Note: R = [X Y Z pitch yaw roll]<br>
-Note: if temporal filtering has already been performed, the motion regressors are filtered too. <br>
-Note: if scrubbing has been requested, a regressor is added for each volume to be censored; the censoring option performs only scrubbing.
-* <b>R:</b> translational and rotational realignment parameters (R) are used as explanatory variables in motion regression.
-* <b>R dR:</b> translational and rotational realignment parameters (R) and their temporal derivatives (dR) are used as explanatory variables in motion regression.
-* <b>R R^2:</b> translational and rotational realignment parameters (R) and their quadratic terms (R^2) are used as explanatory variables in motion regression.
-* <b>R dR R^2 dR^2:</b> realignment parameters (R) with their derivatives (dR), quadratic terms (R^2) and square of derivatives (dR^2) are used in motion regression.
-* <b>R R^2 R-1 R-1^2:</b> realignment parameters at time t (R) and realignment parameters at time t-1 (R-1) with their square terms are used in motion regression.
-* <b>R R^2 R-1 R-1^2 R-2 R-2^2:</b> realignment parameters at time t (R), t-1 (R-1) and t-2 (R-2) with their square terms are used in motion regression.
-* <b>censoring:</b> for each volume tagged for scrubbing, a unit impulse function  with a value of 1 at that time point and 0 elsewhere is included as a regressor.
-* <b>ICA-AROMA:</b> ICA noise components are used as regressors. With modern fMRIPrep, generate these with the standalone [fmripost-aroma](https://fmripost-aroma.readthedocs.io/) BIDS App and point `config.DATADIR` at its derivatives (see [fMRIPrep compatibility](#fmriprep-compatibility)).
+Example output for an HCP subject is available
+[here](https://caltech.box.com/s/t7zaw05wcnudl7b2jvn69wa2fvzlcc4j).
 
-Example: `['MotionRegression',      3, ['R dR']]`
-#### Scrubbing
-Note: this step only flags the volumes to be censored, that are then regressed out in the MotionRegression step.<br>
-Note: uncensored segments of data lasting fewer than 5 contiguous volumes, are flagged for removal as well.
-* <b>FD</b>
-	1. Specify a threshold for framewise displacement (FD) in mm.
-	2. Specify number of adjacent volumes to exclude (optional).
-* <b>DVARS</b>
-	1. Specify a threshold for variance of differentiated signal (DVARS).
-	2. Specify number of adjacent volumes to exclude (optional).
-* <b>FD+DVARS</b>
-	1. Specify a threshold for framewise displacement (FD) in mm.
-	2. Specify a threshold <i>t</i> s.t. volumes with a variance of differentiated signal (DVARS) greater than (100 + <i>t</i>)% of the run median DVARS are flagged for removal (as in Siegel et al, Cerebral Cortex, 2016).
-	3. Specify number of adjacent volumes to exclude (optional).
-* <b>RMS</b>
-	1. Specify threshold for root mean square displacement in mm.
-	2. Specify number of adjacent volumes to exclude (optional).
+---
 
-Example: `['Scrubbing',      4, ['FD+DVARS', 0.25, 5]]`
-#### Tissue Regression 
-* <b>GM:</b> the gray matter signal is added as a regressor.
-	1. Specify if regression should be performed on gray matter signal ('GM') or whole brain signal ('wholebrain')
-* <b>WM:</b> the white matter signal is added as a regressor.
-	1. Specify if regression should be performed on gray matter signal ('GM') or whole brain signal ('wholebrain')
-* <b>WMCSF:</b> white matter and cerebrospinal fluid signals are added as regressors.
-	1. Specify if regression should be performed on gray matter signal ('GM') or whole brain signal ('wholebrain')
-* <b>WMCSF+dt:</b> white matter and cerebrospinal fluid signals with their derivatives		 are added as regressors.
-	1. Specify if regression should be performed on gray matter signal ('GM') or whole brain signal ('wholebrain')
-* <b>WMCSF+dt+sq:</b> white matter and cerebrospinal fluid signals with their derivatives and quadratic terms are added as regressors.
-	1. Specify if regression should be performed on gray matter signal ('GM') or whole brain signal ('wholebrain')
-* <b>CompCor:</b> a PCA-based method (Behzadi et al., 2007) is used to derive N components from CSF and WM signals.
-	1. Specify no. of components to compute for specified tissue mask (see following parameter).
-	2. Specify if components should be computed using a single mask for white matter and cerebrospinal fluid ('WMCSF') or separatedly for white matter and cerebrospinal fluid ('WM+CSF')
-	3. Specify if regression should be performed on gray matter signal ('GM') or whole brain signal ('wholebrain').
+## Changelog
 
-Example: `['TissueRegression',        5, ['CompCor', 5, 'WMCSF', 'wholebrain']]`
-
-#### Global Signal Regression
-* <b>GS:</b> the global signal is added as a regressor.
-* <b>GS+dt+sq:</b> the global signal with its derivatives are added as regressors.
-* <b>GS+dt+sq:</b> the global signal with its derivatives and square term are added as regressors.
-
-Example: `['GlobalSignalRegression',      6, ['GS+dt+sq']]`
-#### Temporal Filtering
-Note: if scrubbing has been requested, censored volumes are replaced by linear interpolation.
-* <b>Butter:</b> Butterworth band pass filtering.
-	1. Specify high pass threshold.
-	2. Specify low pass threshold. 
-* <b>Gaussian:</b> Low pass Gaussian smoothing.
-	1. Specify standard deviation.
-* <b>DCT:</b> The discrete cosine transform is used to compute regressors to perform temporal filtering.
-	1. Specify high pass threshold.
-	2. Specify low pass threshold. 
-
-Example: `['TemporalFiltering',       7, ['Butter', 0.009, 0.08]]`
-
-### Advanced functionalities
-* QC plots: FD trace and grayplot
-* XML reports
-* Basic support for sge
-* Computation of functional connectivy matrices, given a parcellation, or seed-connectivity matrices, given a seed
-* Prediction of individual scores from functional connectivity matrices
+See [CHANGELOG.md](CHANGELOG.md) for the release history, including the shared-core
+refactor and the fMRIPrep compatibility work.
