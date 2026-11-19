@@ -69,3 +69,21 @@ def test_no_deprecated_scipy_ndimage_submodules():
         "scipy.ndimage.morphology/filters are deprecated and removed in "
         "SciPy 2; import from scipy.ndimage instead: " + ", ".join(offenders)
     )
+
+
+def test_no_deprecated_c_element_tree():
+    offenders = []
+    for name, tree in _trees():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "xml.etree.cElementTree":
+                        offenders.append(f"{name}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom) and node.module == (
+                "xml.etree.cElementTree"
+            ):
+                offenders.append(f"{name}:{node.lineno}")
+    assert not offenders, (
+        "xml.etree.cElementTree is deprecated (removed in Python 3.9); use "
+        "xml.etree.ElementTree: " + ", ".join(offenders)
+    )

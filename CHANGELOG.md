@@ -11,9 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Modern-stack compatibility of the shared core**: replaced the NumPy alias
   `np.float` (removed in NumPy 2) with `float`, which fixes the `pcSigCh`
-  voxel-normalisation flavor, and switched the deprecated
+  voxel-normalisation flavor, switched the deprecated
   `scipy.ndimage.morphology` / `scipy.ndimage.filters` imports to the top-level
-  `scipy.ndimage` namespace (removed in SciPy 2).
+  `scipy.ndimage` namespace (removed in SciPy 2), and replaced
+  `xml.etree.cElementTree` with `xml.etree.ElementTree`.
 - `getAllFC()` now selects the correct output extension for CIFTI input; an
   `if`/`else` mistake made it fall back to `.nii.gz`.
 - Corrected the fmripost-aroma confound prefix to `aroma_motion_` (single

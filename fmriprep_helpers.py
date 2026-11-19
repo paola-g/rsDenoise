@@ -73,7 +73,7 @@ import operator
 import gzip
 import string
 import random
-import xml.etree.cElementTree as ET
+import xml.etree.ElementTree as ET
 from time import localtime, strftime, sleep, time
 import fnmatch
 import re
