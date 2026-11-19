@@ -37,6 +37,11 @@ py-modules = [
 [tool.setuptools.packages.find]
 include = ["rsdenoise*", "legacy_helpers*"]
 
+[tool.setuptools.package-data]
+# The pinned compatibility spec is loaded relative to the package at runtime,
+# so it must be shipped alongside the code.
+rsdenoise = ["fmriprep_spec.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
