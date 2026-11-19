@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "fmriprep": {
+    "stable_version": "25.2.7",
+    "release_date": "2026-10-05",
+    "lts_until": "2029-10"
+  },
+  "file_patterns": {
+    "bold_volume": "*_space-*_desc-preproc_bold.nii.gz",
+    "bold_cifti": "*_space-fsLR_den-91k_bold.dtseries.nii",
+    "bold_gifti": "*_hemi-L_space-*_bold.func.gii",
+    "confounds": [
+      "*_desc-confounds_timeseries.tsv",
+      "*_desc-confounds_regressors.tsv",
+      "*_confounds.tsv"
+    ]
+  },
+  "confounds": {
+    "core_columns": [
+      "csf",
+      "white_matter",
+      "global_signal",
+      "dvars",
+      "framewise_displacement",
+      "trans_x",
+      "trans_y",
+      "trans_z",
+      "rot_x",
+      "rot_y",
+      "rot_z"
+    ],
+    "optional_columns": ["std_dvars", "rmsd"],
+    "component_prefixes": [
+      "a_comp_cor_",
+      "c_comp_cor_",
+      "w_comp_cor_",
+      "t_comp_cor_",
+      "edge_comp_",
+      "cosine",
+      "non_steady_state_outlier",
+      "motion_outlier"
+    ],
+    "removed_prefixes": ["aroma_motion__"]
+  },
+  "fmripost_aroma": {
+    "reason": "ICA-AROMA was removed from fmriprep in 23.1.0; noise components are now produced by the separate fmripost-aroma BIDS App",
+    "bold_descriptions": ["aggrDenoised", "nonaggrDenoised", "orthaggrDenoised"],
+    "confounds_pattern": "*_desc-aroma_timeseries.tsv",
+    "component_columns": ["aroma_motion_*", "aroma_orth_motion_*"]
+  },
+  "version_history": {
+    "20.2.0": "confounds renamed desc-confounds_regressors -> desc-confounds_timeseries",
+    "21.0.0": "aCompCor split into a_comp_cor_*, c_comp_cor_*, w_comp_cor_*",
+    "22.1.0": "edge_comp_* regressors added to the aggregate confounds file",
+    "23.1.0": "ICA-AROMA removed; aroma_motion__* columns no longer written",
+    "25.2.7": "MCFLIRT motion confound reconstruction corrected for large motion"
+  }
+}

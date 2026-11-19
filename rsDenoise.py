@@ -1,5 +1,12 @@
-import sys, argparse
-sys.path.append('/projects/MINDLAB2016_MR-SensCogFromNeural/scripts/rsDenoise/repos/rsDenoise')
+import sys, argparse, os
+
+# Prefer the historical HPC source location when present; otherwise run from
+# wherever this script lives so a checkout works without editing the file.
+_SITE_SOURCE_DIR = '/projects/MINDLAB2016_MR-SensCogFromNeural/scripts/rsDenoise/repos/rsDenoise'
+_SOURCE_DIR = (_SITE_SOURCE_DIR if os.path.isdir(_SITE_SOURCE_DIR)
+               else os.path.dirname(os.path.abspath(__file__)))
+if _SOURCE_DIR not in sys.path:
+    sys.path.insert(0, _SOURCE_DIR)
 from fmriprep_helpers import *
 
 ### Set parameters #################################################
@@ -7,7 +14,7 @@ from fmriprep_helpers import *
 
 # Where does the data live?
 config.DATADIR = '/projects/MINDLAB2016_MR-SensCogFromNeural/scratch/rsDenoise/derivatives/'
-config.sourceDir = '/projects/MINDLAB2016_MR-SensCogFromNeural/scripts/rsDenoise/repos/rsDenoise' # or replace with path to source code
+config.sourceDir = _SOURCE_DIR # or replace with path to source code
 
 # Processing options
 config.preprocessing = 'freesurfer' 

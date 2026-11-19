@@ -8,10 +8,25 @@ This configurable pipeline for the processing of resting-state fMRI was original
 
 The pipeline works with both volumetric (NIFTI) and surface data (either CIFTI or GIFTI).
 
-All functions needed for processing are grouped in three helpers file:
-- `HCP_helpers.py` contains the set of functions to work with the HCP directory structure
-- `fmriprepciftify_helpers.py` is meant to work with data previously processed with fmriprep and freesurfer, converted to HCP-like structure with ciftify
-- `fmriprep_helpers.py` is designed to work directly with fmriprep outputs, with or without freesurfer outputs
+### Helper modules (shared core + compatibility shims)
+
+All three historical import paths still work, but the implementation now lives in a
+single shared core:
+
+- `fmriprep_helpers.py` — the shared core used by the CLI, the example script and
+  both shims. Works directly with fMRIPrep outputs, with or without FreeSurfer.
+- `fmriprepciftify_helpers.py` — compatibility shim re-exporting the shared core.
+- `HCP_helpers.py` — compatibility shim re-exporting the shared core.
+
+The original, pre-consolidation forks are archived under `legacy_helpers/` for
+reference. Their handful of fork-specific functions (task design, partial
+correlation helpers, the old in-pipeline ICA-AROMA implementation) are exposed
+**lazily** by the shims — they depend on FSL and old SciPy/NumPy APIs and are only
+loaded if explicitly requested. New analyses should use the shared core.
+
+`rsdenoise/` holds the lightweight, dependency-free compatibility layer
+(BIDS/fMRIPrep file discovery, confounds parsing and spec tracking). It is what
+the automated compatibility tests exercise.
 
 The IPython notebooks provide a few examples of use (more can be found here: [HCP_MRI-behavior](https://github.com/adolphslab/HCP_MRI-behavior "HCP_MRI-behavior"))
 A minimal script to launch the pipeline is provided in `runPipeline_example.py`. A command line wrapper is provided in `rsDenoise.py`.
@@ -25,7 +40,53 @@ Example output for a HCP subject [here](https://caltech.box.com/s/t7zaw05wcnudl7
 ## Overview
 
 ### Prerequisites
-The code depends on a set of python libraries, including: scipy, pandas, matplotlib, statsmodels, numpy, nibabel, nilearn, nipype, seaborn, scikit_learn.
+The code depends on a set of python libraries, including: scipy, pandas, matplotlib, statsmodels, numpy, nibabel, nilearn, nipype, seaborn, scikit_learn. Install with `pip install -e .`. The archived legacy helpers additionally need `future` (`pip install -e .[legacy]`) and FSL.
+
+### fMRIPrep compatibility
+
+The pipeline targets the current stable fMRIPrep release (recorded in
+`rsdenoise/fmriprep_spec.json`; currently 25.2.7). Input files and confounds are
+**discovered**, not reconstructed from hard-coded filename templates, so both
+modern (`*_desc-confounds_timeseries.tsv`) and older
+(`*_desc-confounds_regressors.tsv`) derivatives are handled. Confounds columns
+are normalised by name and numbered component columns are ordered by their
+numeric suffix rather than by TSV position.
+
+Named CompCor families written by recent fMRIPrep (`a_`, `c_`, `w_`,
+`edge_comp_*`), along with high-pass and spike regressors, are recognised. If a
+required family is absent (for example `a_comp_cor_*` when CompCor was not
+enabled), the failing operation raises a descriptive error instead of silently
+using an empty design matrix.
+
+#### ICA-AROMA
+
+fMRIPrep removed ICA-AROMA in 23.1.0. The `ICA-AROMA` motion-regression flavor
+is still supported, but it now consumes noise components from the standalone
+[fmripost-aroma](https://fmripost-aroma.readthedocs.io/) BIDS App:
+
+1. Run current fMRIPrep with `--cifti-output` (or the desired volume space).
+2. Run fmripost-aroma on those derivatives.
+3. Point `config.DATADIR` at the fmripost-aroma derivatives directory.
+
+The shared core discovers `*_desc-aroma_timeseries.tsv` and the
+`*_desc-{aggr,nonaggr,orthaggr}Denoised_bold.nii.gz` files automatically. The
+old in-pipeline AROMA implementation remains available only through the lazily
+loaded `HCP_helpers` archive.
+
+### Development and automated compatibility checks
+
+Run the synthetic-fixture test suite with:
+
+```
+python -m pip install -e .[test]
+python -m pytest -q
+```
+
+GitHub Actions runs these tests on every push/PR and performs a weekly
+release-watch: it polls the stable fMRIPrep version and its machine-readable
+confound definitions, generates fresh synthetic fixtures, and opens a review PR
+with a compatibility report when output naming or columns drift. See
+`.github/workflows/`.
 
 ### Preprocessing Pipeline
 Preprocessing is performed by executing a sequence of steps or operations, each of which corresponds to a function in the helpers file. There are 7 available operations: [Voxel Normalization](#voxel-normalization), [Detrending](#detrending), [Motion Regression](#motion-regression), [Scrubbing](#voxel-normalization), [Tissue Regression](#tissue-regression), [Global Signal Regression](#global-signal-regression) and [Temporal Filtering](#temporal-filtering). The corresponding functions are built using the following template:
@@ -137,7 +198,7 @@ Note: if scrubbing has been requested, a regressor is added for each volume to b
 * <b>R R^2 R-1 R-1^2:</b> realignment parameters at time t (R) and realignment parameters at time t-1 (R-1) with their square terms are used in motion regression.
 * <b>R R^2 R-1 R-1^2 R-2 R-2^2:</b> realignment parameters at time t (R), t-1 (R-1) and t-2 (R-2) with their square terms are used in motion regression.
 * <b>censoring:</b> for each volume tagged for scrubbing, a unit impulse function  with a value of 1 at that time point and 0 elsewhere is included as a regressor.
-* <b>ICA-AROMA:</b> ICA is used to identify noise components that are used as regressors.
+* <b>ICA-AROMA:</b> ICA noise components are used as regressors. With modern fMRIPrep, generate these with the standalone [fmripost-aroma](https://fmripost-aroma.readthedocs.io/) BIDS App and point `config.DATADIR` at its derivatives (see [fMRIPrep compatibility](#fmriprep-compatibility)).
 
 Example: `['MotionRegression',      3, ['R dR']]`
 #### Scrubbing

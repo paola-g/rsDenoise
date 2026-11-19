@@ -79,6 +79,15 @@ import re
 import os
 import glob
 import seaborn as sns
+from rsdenoise import (
+    find_aroma_confounds_file,
+    find_aseg_file,
+    find_bold_file,
+    find_confounds_file,
+    find_probseg_file,
+    canonicalize_column_names,
+    order_component_columns,
+)
 #from astropy.timeseries import LombScargle
 
 #----------------------------------
@@ -108,28 +117,33 @@ def outpath():
 
     return outPath
 
-def get_confounds():
-    # fields from fmriprep: csf	white_matter global_signal std_dvars dvars framewise_displacement 
-    # t_comp_cor_00 t_comp_cor_01 t_comp_cor_02 t_comp_cor_03 t_comp_cor_04 t_comp_cor_05
-    # a_comp_cor_00 a_comp_cor_01 a_comp_cor_02 a_comp_cor_03 a_comp_cor_04 a_comp_cor_05	
-    # cosine00 cosine01 cosine02 cosine03 trans_x trans_y trans_z rot_x	rot_y rot_z
-    if hasattr(config, 'confounds') and not (config.confounds is None):
-        return config.confounds
-    if hasattr(config, 'session') and config.session:
-        confoundsFile =  op.join(config.DATADIR, config.subject, config.session,'func', 
-		config.subject+'_'+config.session+'_'+config.fmriRun+'_desc-confounds_timeseries.tsv')
-        if not op.isfile(confoundsFile): # try older fmriprep file name
-            confoundsFile =  op.join(config.DATADIR, config.subject, config.session,'func', 
-	       	    config.subject+'_'+config.session+'_'+config.fmriRun+'_desc-confounds_regressors.tsv')
-    else:
-        confoundsFile =  op.join(config.DATADIR, config.subject, 'func', 
-		config.subject+'_'+config.fmriRun+'_desc-confounds_timeseries.tsv')
-        if not op.isfile(confoundsFile): # try older fmriprep file name
-            confoundsFile =  op.join(config.DATADIR, config.subject, 'func', 
-		    config.subject+'_'+config.fmriRun+'_desc-confounds_regressors.tsv')
+def get_confounds(aroma=False):
+    """Load confounds by discovery, not by a hard-coded fmriprep filename.
+
+    ``aroma=True`` reads the noise components written by fmripost-aroma.
+    """
+    cache_name = 'aromaConfounds' if aroma else 'confounds'
+    if hasattr(config, cache_name) and getattr(config, cache_name) is not None:
+        return getattr(config, cache_name)
+    session = getattr(config, 'session', None)
+    finder = find_aroma_confounds_file if aroma else find_confounds_file
+    confoundsFile = finder(config.DATADIR, config.subject,
+                           config.fmriRun, session=session)
+    if confoundsFile is None:
+        raise FileNotFoundError(
+            'No {} confounds TSV found for {} / {} / {}. Looked for '
+            'desc-confounds_timeseries.tsv (desc-aroma_timeseries.tsv for '
+            'aroma) and older naming variants under {}'
+            .format('aroma' if aroma else 'standard', config.subject,
+                    session or '(no session)', config.fmriRun, config.DATADIR)
+        )
     data = pd.read_csv(confoundsFile, delimiter='\t')
     data.replace('n/a', 0, inplace=True)
-    config.confounds = data
+    # Normalise aliases (e.g. old `fd`) and fix component ordering, which is
+    # data-dependent in fmriprep and must not be taken from TSV column order.
+    data.columns = canonicalize_column_names(data.columns)
+    data = data[order_component_columns(data.columns)]
+    setattr(config, cache_name, data)
     return data
 
 #----------------------------------
@@ -301,7 +315,9 @@ config.operationDict = {
 #  @param  [int] nTRs number of time points
 #  @param  [int] TR repetition time
 #  @return [np.array] filtered regressors
-#  
+#
+
+
 def filter_regressors(regressors, filtering, nTRs, TR):
     if len(filtering)==0:
         print('Warning! Missing or wrong filtering flavor. Regressors were not filtered.')
@@ -416,9 +432,14 @@ def load_img(volFile,maskAll=None,unzip=config.useMemMap):
 #  @return [tuple] whole brain, white matter, cerebrospinal fluid and gray matter masks
 #  
 def makeTissueMasks(overwrite=False,precomputed=False, maskThreshold=0.33):
+    session = getattr(config, 'session', None)
     if config.isCifti or config.isGifti:
-        prefix = '_'+config.session if  hasattr(config,'session')  else '' 
-        fmriFile = op.join(buildpath(), config.subject+prefix+'_'+config.fmriRun+'_space-'+config.space+'_desc-preproc_bold.nii.gz')
+        fmriFile = find_bold_file(config.DATADIR, config.subject, config.fmriRun,
+                                  session=session, space=config.space)
+        if fmriFile is None:
+            raise FileNotFoundError(
+                'No volumetric BOLD companion found for CIFTI/GIFTI input of '
+                '{} / {} / {}'.format(config.subject, session, config.fmriRun))
     else:
         fmriFile = config.fmriFile
     WMmaskFileout = op.join(outpath(),'WMmask.nii')
@@ -427,16 +448,18 @@ def makeTissueMasks(overwrite=False,precomputed=False, maskThreshold=0.33):
     
     if not op.isfile(GMmaskFileout) or overwrite:
         if config.preprocessing == 'freesurfer': # output of fmriprep + freesurfer
-            session = config.session if hasattr(config,'session') else ''
-            prefix = config.session+'_' if  hasattr(config,'session')  else ''
-            template = config.space
-            wmFiles =  glob.glob(op.join(config.DATADIR, config.subject, session, 'func',config.subject+'_'+prefix+config.fmriRun+'*_space-'+template+'*_desc-aseg_dseg.nii.gz'))
-            if len(wmFiles) > 0: 
-               wmparcFilein = wmFiles[0]
-               ribbonFilein = wmparcFilein.replace('aseg_dseg','aparcaseg_dseg')
-            else: # files not found
-               print('Error! Tissue file not found:',op.join(config.DATADIR, config.subject, session, 'func',config.subject+prefix+config.fmriRun+'*_space-'+template+'_desc-aseg_dseg.nii.gz')) 
-               return None
+            session = getattr(config, 'session', None)
+            wmparcFilein = find_aseg_file(config.DATADIR, config.subject,
+                                          session=session, space=config.space)
+            if wmparcFilein is None:
+                raise FileNotFoundError(
+                    'No desc-aseg_dseg.nii.gz found for {} / {}'.format(
+                        config.subject, session))
+            wmparcFilein = str(wmparcFilein)
+            ribbonFilein = wmparcFilein.replace('aseg_dseg', 'aparcaseg_dseg')
+            if not op.isfile(ribbonFilein):
+                raise FileNotFoundError(
+                    'Matching aparcaseg_dseg file not found: {}'.format(ribbonFilein))
             ribbonFileout = op.join(outpath(), 'ribbon.nii.gz')
             wmparcFileout = op.join(outpath(), 'wmparc.nii.gz')
             # make identity matrix to feed to flirt for resampling
@@ -506,33 +529,22 @@ def makeTissueMasks(overwrite=False,precomputed=False, maskThreshold=0.33):
             call(cmd,shell=True)
 
         else: # only fmriprep
-            session = config.session if hasattr(config,'session') else ''
-            prefix = '_'+config.session if hasattr(config,'session') else ''
-            if config.space == 'T1w':
-                wmFilein =  op.join(config.DATADIR, config.subject, session, 'anat', config.subject+prefix+'_label-WM_probseg.nii.gz')
-                if not op.isfile(wmFilein): # trying adding run
-                  prefix = prefix + '_' + config.fmriRun
-                  wmFilein =  op.join(config.DATADIR, config.subject, session, 'anat', config.subject+prefix+'_label-WM_probseg.nii.gz')
-                gmFilein =  op.join(config.DATADIR, config.subject, session, 'anat', config.subject+prefix+'_label-GM_probseg.nii.gz')
-                csfFilein =  op.join(config.DATADIR, config.subject, session, 'anat', config.subject+prefix+'_label-CSF_probseg.nii.gz')
-            else: # format template_res-?
-                template = config.space
-                wmFiles =  glob.glob(op.join(config.DATADIR, config.subject, session, 'anat',config.subject+prefix+'*_space-'+template+'_label-WM_probseg.nii.gz'))
-                if len(wmFiles) > 0: 
-                    wmFilein = wmFiles[0]
-                    gmFilein = wmFilein.replace('WM','GM')
-                    csfFilein = wmFilein.replace('WM','CSF')
-                else: # trying old fmriprep file names (no res-?)
-                    template = (config.space).split('_')[0]
-                    wmFiles =  glob.glob(op.join(config.DATADIR, config.subject, session, 'anat',config.subject+prefix+'*_space-'+template+'_label-WM_probseg.nii.gz'))
-                    if len(wmFiles) > 0: 
-                        wmFilein = wmFiles[0]
-                        gmFilein = wmFilein.replace('WM','GM')
-                        csfFilein = wmFilein.replace('WM','CSF')
-                    else: # files not found
-                        print('Error! Tissue file not found:',op.join(config.DATADIR, config.subject, session, 'anat',config.subject+prefix+'*_space-'+template+'_label-WM_probseg.nii.gz')) 
-                        return None
-
+            session = getattr(config, 'session', None)
+            wmFilein = find_probseg_file(config.DATADIR, config.subject,
+                                         session=session, space=config.space,
+                                         label='WM')
+            gmFilein = find_probseg_file(config.DATADIR, config.subject,
+                                         session=session, space=config.space,
+                                         label='GM')
+            csfFilein = find_probseg_file(config.DATADIR, config.subject,
+                                          session=session, space=config.space,
+                                          label='CSF')
+            if not all(p is not None for p in (wmFilein, gmFilein, csfFilein)):
+                raise FileNotFoundError(
+                    'WM/GM/CSF probability maps not found for {} / {} in {}'
+                    .format(config.subject, session, config.DATADIR))
+            wmFilein, gmFilein, csfFilein = (str(wmFilein), str(gmFilein),
+                                            str(csfFilein))
             # load nii 
             ref = nib.load(wmFilein)
  
@@ -601,10 +613,18 @@ def extract_noise_components(niiImg=None, WMmask=None, CSFmask=None, num_compone
     """
     if flavor == 'fmriprep' or flavor == None:
         data = get_confounds()
+        data = data[order_component_columns(data.columns)]
+        component_columns = [c for c in data.columns
+                             if re.match(r"^a_comp_cor_\d+$", c)]
+        if not component_columns:
+            raise ValueError(
+                'No a_comp_cor_* columns found in confounds. fmriprep only '
+                'writes these when --return-all-components is used or when '
+                'aCompCor is enabled.')
         if num_components == 0:
-            components = np.array(data.filter(regex=("a_comp_cor_*")))
+            components = np.array(data[component_columns])
         else:
-            components = np.array(data.filter(regex=("a_comp_cor_*")))[:,:num_components]
+            components = np.array(data[component_columns])[:,:num_components]
     if flavor == 'WMCSF':
         niiImgWMCSF = niiImg[np.logical_or(WMmask,CSFmask),:] 
         niiImgWMCSF[np.isnan(np.sum(niiImgWMCSF, axis=1)), :] = 0
@@ -845,11 +865,11 @@ def checkXML(inFile, operations, params, resDir, isCifti=False, isGifti=False, u
 #  
 def get_rcode(mystring):
     if config.isCifti:
-        return re.search('.*_(........)\.dtseries.nii', mystring).group(1)
+        return re.search(r'.*_(........)\.dtseries.nii', mystring).group(1)
     elif config.isGifti:
-        return re.search('.*_(........)\.func.gii', mystring).group(1)
+        return re.search(r'.*_(........)\.func.gii', mystring).group(1)
     else:
-        return re.search('.*_(........)\.nii.gz', mystring).group(1)
+        return re.search(r'.*_(........)\.nii.gz', mystring).group(1)
 
 def _make_gen(reader):
     b = reader(1024 * 1024)
@@ -1231,7 +1251,20 @@ def MotionRegression(niiImg, flavor, masks, imgInfo):
         nRows, nCols, nSlices, nTRs, affine, TR, header =  imgInfo
         X = np.empty((nTRs, 0))
     elif flavor[0] == 'ICA-AROMA':
-        X = np.array(data.filter(regex=("aroma_motion__*")))
+        # fmriprep >=23.1 no longer writes aroma_motion_* columns.  Point
+        # config.DATADIR at an fmripost-aroma derivatives tree instead; its
+        # desc-aroma_timeseries.tsv provides the same noise components.
+        aroma_data = get_confounds(aroma=True)
+        aroma_columns = [
+            c for c in aroma_data.columns
+            if re.match(r"^aroma_(orth_)?motion_", c)
+        ]
+        if not aroma_columns:
+            raise ValueError(
+                'No aroma_motion_* / aroma_orth_motion_* columns found. '
+                'fmripost-aroma writes them to desc-aroma_timeseries.tsv; '
+                'point config.DATADIR at its derivatives directory.')
+        X = np.array(aroma_data[aroma_columns])
     else:
         print('Wrong flavor, using default regressors: R dR')
         X1 = np.array(data.loc[:,('trans_x', 'trans_y', 'trans_z', 'rot_x', 'rot_y', 'rot_z')])
@@ -1748,7 +1781,12 @@ def TemporalFiltering(niiImg, flavor, masks, imgInfo):
             return K
         else:
             X = get_confounds()
-            X = X.filter(regex=("cosine*"))
+            X = X.filter(regex=(r"^cosine\d+$"))
+            if X.shape[1] == 0:
+                raise ValueError(
+                    'No cosine* high-pass regressors found in confounds. '
+                    'fmriprep only writes these when a high-pass filter was '
+                    'requested (--high-pass-filter).')
             return np.array(X)
     else:
         print('Warning! Wrong temporal filtering flavor. Nothing was done'    )
@@ -2208,13 +2246,15 @@ def getAllFC(subjectList,runs,sessions=None,parcellation=None,operations=None,ou
                     for config.fmriRun in runs:
                         if FCDir is None: # retrieve data from each subject's folder
                             # retrieve the name of the denoised fMRI file
-                            if hasattr(config,'fmriFileTemplate'):
-                                inputFile = op.join(config.DATADIR, config.fmriFileTemplate.replace('#fMRIrun#', config.fmriRun).replace('#fMRIsession#', config.session).replace('#subjectID#', config.subject))
-                            else:
-                                if isCifti:
-                                    inputFile = op.join(buildpath(), config.subject+'_'+config.session+'_'+config.fmriRun+'_space-'+config.surface+'_bold.dtseries.nii')
-                                else:
-                                    inputFile = op.join(buildpath(), config.subject+'_'+config.session+'_'+config.fmriRun+'_space-'+config.space+'_desc-preproc_bold.nii.gz')
+                            inputFile = find_bold_file(
+                                config.DATADIR, config.subject, config.fmriRun,
+                                session=getattr(config, 'session', None),
+                                space=config.space, is_cifti=isCifti,
+                                is_gifti=isGifti,
+                                template=getattr(config, 'fmriFileTemplate', None))
+                            if inputFile is None:
+                                continue
+                            inputFile = str(inputFile)
                             outputPath = outpath() if outputDir is None else outputDir
                             preproFile = retrieve_preprocessed(inputFile, operations, outputPath, isCifti, isGifti)
                             if preproFile:
@@ -2246,13 +2286,15 @@ def getAllFC(subjectList,runs,sessions=None,parcellation=None,operations=None,ou
                 for config.fmriRun in runs:
                     if FCDir is None: # retrieve data from each subject's folder
                         # retrieve the name of the denoised fMRI file
-                        if hasattr(config,'fmriFileTemplate'):
-                            inputFile = op.join(config.DATADIR, config.fmriFileTemplate.replace('#fMRIrun#', config.fmriRun).replace('#fMRIsession#', config.session).replace('#subjectID#', config.subject))
-                        else:
-                            if isCifti:
-                                inputFile = op.join(buildpath(), config.subject+'_'+config.fmriRun+'_space-'+config.surface+'_bold.dtseries.nii')
-                            else:
-                                inputFile = op.join(buildpath(), config.subject+'_'+config.fmriRun+'_space-'+config.space+'_desc-preproc_bold.nii.gz')
+                        inputFile = find_bold_file(
+                            config.DATADIR, config.subject, config.fmriRun,
+                            session=getattr(config, 'session', None),
+                            space=config.space, is_cifti=isCifti,
+                            is_gifti=isGifti,
+                            template=getattr(config, 'fmriFileTemplate', None))
+                        if inputFile is None:
+                            continue
+                        inputFile = str(inputFile)
                         outputPath = outpath() if (outputDir is None) else outputDir
                         preproFile = retrieve_preprocessed(inputFile, operations, outputPath, isCifti, isGifti)
                         if preproFile:
@@ -2993,6 +3035,10 @@ def runPredictionParJD(fcMatFile, dataFile, SM='PMAT24_A_CR', iPerm=[0], confoun
 #  
 def runPipeline():
 
+    # Confounds are cached per run; never reuse the previous subject's table.
+    config.confounds = None
+    config.aromaConfounds = None
+
     Flavors = config.Flavors
     steps   = config.steps
     sortedOperations = config.sortedOperations
@@ -3007,8 +3053,14 @@ def runPipeline():
 
     if config.isCifti:
         # volume
-        prefix = '_'+config.session if  hasattr(config,'session')  else ''
-        volFile = op.join(buildpath(), config.subject+prefix+'_'+config.fmriRun+'_space-'+config.space+'_desc-preproc_bold.nii.gz')
+        volFile = find_bold_file(config.DATADIR, config.subject, config.fmriRun,
+                                 session=getattr(config, 'session', None),
+                                 space=config.space)
+        if volFile is None:
+            raise FileNotFoundError(
+                'No volumetric BOLD companion found for CIFTI input of {} / {}'
+                .format(config.subject, config.fmriRun))
+        volFile = str(volFile)
         print('Loading [volume] data in memory... {}'.format(volFile))
         volData, nRows, nCols, nSlices, nTRs, affine, TR, header = load_img(volFile, maskAll) 
         # cifti
@@ -3147,24 +3199,20 @@ def runPipelinePar(launchSubproc=False,overwriteFC=False,cleanup=True,do_makeGra
     else:
         config.ext = '.nii.gz'
 
-    if hasattr(config,'fmriFileTemplate'):
-        if hasattr(config, 'session'):
-            config.fmriFile = op.join(config.DATADIR, config.fmriFileTemplate.replace('#fMRIrun#', config.fmriRun).replace('#fMRIsession#', config.session).replace('#subjectID#', config.subject))
-        else:
-            config.fmriFile = op.join(config.DATADIR, config.fmriFileTemplate.replace('#fMRIrun#', config.fmriRun).replace('#subjectID#', config.subject))
-    else:
-        prefix = '_'+config.session if  hasattr(config,'session')  else ''
-        if config.isCifti:
-            config.fmriFile = op.join(buildpath(), config.subject+prefix+'_'+config.fmriRun+'_space-'+config.surface+'_bold.dtseries.nii')
-        elif config.isGifti:
-            config.fmriFile = op.join(buildpath(), config.subject+prefix+'_'+config.fmriRun+'_space-'+config.surface+'_bold.func.gii')
-        else:
-            config.fmriFile = op.join(buildpath(), config.subject+prefix+'_'+config.fmriRun+'_space-'+config.space+'_desc-preproc_bold.nii.gz')
-    
-    if not op.isfile(config.fmriFile):
-        print(config.fmriFile, 'missing')
+    config.fmriFile = find_bold_file(
+        config.DATADIR, config.subject, config.fmriRun,
+        session=getattr(config, 'session', None),
+        space=getattr(config, 'space', None),
+        is_cifti=config.isCifti, is_gifti=config.isGifti,
+        template=getattr(config, 'fmriFileTemplate', None),
+    )
+    if config.fmriFile is None:
+        print('No BOLD file found for {} / {} / {} under {}'.format(
+            config.subject, getattr(config, 'session', None), config.fmriRun,
+            config.DATADIR))
         sys.stdout.flush()
         return False
+    config.fmriFile = str(config.fmriFile)
 
     toExclude = config.excludeTimePoints.replace('#fMRIrun#', config.fmriRun).replace('#subjectID#', config.subject)
     if hasattr(config, 'session') and config.session: toExclude = toExclude.replace('#fMRIsession#', config.session)

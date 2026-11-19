@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rsdenoise"
+version = "0.2.0"
+description = "Configurable resting-state fMRI denoising pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "nibabel>=5.0",
+    "nilearn>=0.10",
+    "nipype>=1.8",
+    "scikit-learn>=1.2",
+    "seaborn>=0.12",
+    "statsmodels>=0.14",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.4"]
+# Needed only by the archived HCP ICA-AROMA helpers in legacy_helpers/.
+legacy = ["future>=0.18"]
+
+[tool.setuptools]
+py-modules = [
+    "rsDenoise",
+    "runPipeline_example",
+    "fmriprep_helpers",
+    "fmriprepciftify_helpers",
+    "HCP_helpers",
+]
+
+[tool.setuptools.packages.find]
+include = ["rsdenoise*", "legacy_helpers*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning"]

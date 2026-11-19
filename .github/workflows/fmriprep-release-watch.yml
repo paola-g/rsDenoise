@@ -1,0 +1,75 @@
+name: fmriprep release watch
+
+on:
+  schedule:
+    # Weekly, Mondays 06:17 UTC
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.result.outputs.version }}
+      changes: ${{ steps.result.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Probe current fmriprep stable spec
+        id: result
+        run: |
+          set +e
+          python scripts/probe_fmriprep_spec.py --report probe.json
+          probe_status=$?
+          set -e
+          echo "probe exit status: $probe_status"
+          cat probe.json
+          echo "version=$(python -c 'import json;print(json.load(open("probe.json"))["new_version"])')" >> "$GITHUB_OUTPUT"
+          echo "changes=$(python -c 'import json;print("yes" if json.load(open("probe.json"))["requires_changes"] else "no")')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-report
+          path: probe.json
+
+  pull-request:
+    needs: probe
+    if: needs.probe.outputs.changes == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: probe-report
+      - name: Apply probe report
+        run: |
+          python scripts/apply_probe.py probe.json
+          python scripts/generate_fixtures.py \
+            --out "tests/fixtures/fmriprep-${{ needs.probe.outputs.version }}"
+      - name: Verify generated fixtures
+        run: python -m pytest -q
+      - name: Create review PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: bot/fmriprep-${{ needs.probe.outputs.version }}
+          delete-branch: true
+          commit-message: "chore: probe fmriprep ${{ needs.probe.outputs.version }} compatibility"
+          title: "fMRIPrep ${{ needs.probe.outputs.version }} compatibility review"
+          body: |
+            Automated probe detected fmriprep output-spec drift.
+
+            See `docs/fmriprep-compat-report.md` for detected columns and a
+            review checklist. Synthetic fixtures were regenerated and the
+            compatibility test suite was run successfully.
+
+            This PR is a proposal: please verify the mapping of any new
+            confounds columns before merging.
