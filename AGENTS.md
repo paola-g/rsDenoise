@@ -1,0 +1,46 @@
+# AGENTS.md — rsDenoise-refactor
+
+## Repo shape
+- Resting-state fMRI denoising pipeline (Python + scientific stack). Working branch is `refactor`, tracking `origin/refactor` at https://github.com/paola-g/rsDenoise. Remote history was preserved: the shared-core refactor was grafted onto the real remote tip `c28a029` (the local folder had been re-initialized with an unrelated empty history; commit `9d2135e` is the equivalent refactor on that old history).
+- Packaging via `pyproject.toml` (setuptools, `py-modules` + `rsdenoise*` / `legacy_helpers*` packages). Dependencies have minimum versions there; `README.md` is the prose overview. Extras: `[test]` (pytest), `[legacy]` (`future`, only for archived helpers).
+- Automated tests exist: `tests/` (23 tests, stdlib-only by design). Verify with `python -m pytest -q`. No lint/format config, no lockfile. Real-data verification still means running a script/notebook on actual derivatives.
+- CI: `.github/workflows/tests.yml` (unit tests + full-dependency import/wiring smoke tests) and `.github/workflows/fmriprep-release-watch.yml` (weekly probe → generated fixtures → tests → review PR via `peter-evans/create-pull-request` using `GITHUB_TOKEN`). Remote `origin` is configured to `https://github.com/paola-g/rsDenoise.git`; the workflows are authored but the PR path has not been triggered/exercised end-to-end yet.
+
+## Architecture (the big one)
+- **`fmriprep_helpers.py` is the single shared core.** Both `rsDenoise.py` and `runPipeline_example.py` import it, and both other helper import paths re-export it. Edits to the core propagate everywhere.
+- `fmriprepciftify_helpers.py` and `HCP_helpers.py` are now **thin compatibility shims**: `from fmriprep_helpers import *` plus a PEP 562 `__getattr__` that lazily exposes a handful of fork-only functions from `legacy_helpers/`. They share the core's `config` object (`config is fmriprep_helpers.config`).
+- The original standalone forks are archived under `legacy_helpers/` for reference. Its modules were patched to import on modern SciPy/sklearn/nilearn (`scipy.ndimage` instead of `.morphology`/`.filters`, `GraphicalLassoCV as GraphLassoCV`, `nilearn.glm.first_level.design_matrix` instead of `nistats`, `np.bool_`, `xml.etree.ElementTree`). They still require FSL. **Do not add new behavior there**; change the core.
+- `rsdenoise/` is a lightweight, dependency-free compatibility layer, and is what the automated tests exercise:
+  - `bids.py` — BIDS-entity discovery of BOLD / confounds / aseg / probseg files, plus legacy `fmriFileTemplate` expansion.
+  - `confounds.py` — TSV parsing, alias canonicalisation, component ordering by numeric suffix, validation.
+  - `spec.py` + `fmriprep_spec.json` — pinned compatibility spec (targets fMRIPrep **25.2.7**, LTS) and version history.
+- `config` remains a plain class used as a mutable global namespace; configure by assigning attributes (`config.DATADIR`, `config.subject`, `config.Operations`, ...) before calling `runPipelinePar()`. No config object/injection. `config.operationDict` (15 named pipelines) and `Hooks` (7 operations) live in the core.
+- A pipeline is an ordered list of `[operation_name, order, params]`. Names must be keys in the core `Hooks`; equal order numbers are merged into one regression step. `runPipelinePar()` force-moves any `Scrubbing` whose order is not 0/1 to order 1 and renumbers the rest — configured orders are not preserved verbatim.
+- `get_confounds()` caches per run in `config.confounds` (and `config.aromaConfounds` for AROMA); `runPipeline()` resets both at start. Confounds panels are keyed by name, not TSV position; component columns are sorted by suffix. Missing required families (e.g. `a_comp_cor_*`, `cosine*`) now raise descriptive errors instead of silently producing empty designs.
+- `config.queue = True` does **not** run locally: `runPipelinePar()` generates a Python snippet + `.sh` under `tmp<timestamp>/`, appends them to `config.scriptlist`, and the caller invokes `fnSubmitJobArrayFromJobList()` → `qsub`; `checkProgress()` polls `qstat`. Generated scripts embed the discovered `config.fmriFile` and `config.DATADIR`, so discovery works in queue mode too. For local execution use `config.queue = False` **and** `launchSubproc=True` (otherwise it runs in-process via `runPipeline()`).
+
+## Entrypoints and site paths
+- `rsDenoise.py` = CLI. Required: `-data`, `-i`, `-pipe`, `-o`; also `-cifti`, `-gifti`, `-space`, `-surf`, `-smooth`, `-vFC`, `-seed`, `-FCdir`, parcellation flags. Site defaults remain for `config.DATADIR`, `config.preprocessing='freesurfer'`, `config.queue=True`, `config.sgeopts`, `config.overwrite=False`, `config.n_contiguous=1`. `-data` overrides `DATADIR`.
+  - `config.sourceDir` / `sys.path` now fall back to the script's own directory when the hard-coded HPC path `/projects/MINDLAB2016_MR-SensCogFromNeural/...` does not exist — no local path edits needed to import the shared core. It is still baked into generated job scripts as `sys.path.insert`.
+  - **Nothing overrides `fmriRuns`**; it stays fixed to `['task-rest_run-1', 'task-rest_run-2']` — edit the file for other runs.
+- `runPipeline_example.py` = minimal in-code example: CIFTI, `queue=True`, `outDir='rsDenoise'`, single `sub-0040` / `task-rest_run-01`.
+- Notebooks: `fmriprep_YALE.ipynb` uses the `fmriprepciftify_helpers` shim and pipeline `'A'` (still works via the shared core); `FC_plots_Conte.ipynb` imports `fmriprep_helpers` and consumes precomputed FC; `Conte_cifti.ipynb`, `Conte_MNI.ipynb`, `Conte_native.ipynb` import a nonexistent `helpers` module and are stale/broken. `data/*.txt` are example subject ID lists (Conte dataset).
+
+## Data and naming conventions
+- Inputs live in `DATADIR/sub-<id>[/ses-<id>]/func/`; `resolve_data_root()` also accepts a derivatives parent containing `fmriprep/` or `derivatives/`. `runPipelinePar()` now **discovers** BOLD files by entities rather than assembling one hard-coded name. It handles modern fMRIPrep (`*_space-<space>_desc-preproc_bold.nii.gz`, `*_space-fsLR_den-91k_bold.dtseries.nii`, `*_hemi-L*_bold.func.gii`), older/ciftify names, and fmripost-aroma denoised BOLD. Override with `config.fmriFileTemplate` using `#subjectID#`, `#fMRIsession#`, `#fMRIrun#` placeholders; when present it takes precedence over discovery.
+- Confounds: discovery prefers `*_desc-confounds_timeseries.tsv`, falls back to `*_desc-confounds_regressors.tsv` and older names. Recognised families include `a_/c_/w_/t_comp_cor_*`, `edge_comp_*`, `cosine*`, `non_steady_state_outlier*`, `motion_outlier*`. `aroma_motion__*` is legacy; ICA-AROMA removed from fMRIPrep in 23.1.0.
+- ICA-AROMA with modern fMRIPrep: run the standalone [fmripost-aroma](https://fmripost-aroma.readthedocs.io/) BIDS App, point `config.DATADIR` at **its** derivatives tree, and use the `ICA-AROMA` motion flavor. Discovery reads `*_desc-aroma_timeseries.tsv` and `aroma_motion_*` / `aroma_orth_motion_*` columns. The old in-pipeline AROMA functions are only reachable through the lazy `HCP_helpers` shim.
+- Subject list file: one ID per line; CLI prepends `sub-` when absent.
+- Outputs: `<outDir>/denoise_<pipeline>/<subject>[/<session>]/<run>/`; FC defaults to `<outDir>/<pipeline>_surf_FC` or `_vol_FC`.
+- Matplotlib is forced to the `Agg` backend at core import time — no interactive plotting.
+
+## Compatibility tooling / CI details
+- `scripts/probe_fmriprep_spec.py` detects the stable version from PyPI and confound-name drift from pinned fMRIPrep source (GitHub Contents/raw URLs). It exits 2 only on version change, new prefixes, or confounds-filename change; "missing" prefixes are informational (some are generated by pinned niworkflows/nipype dependencies) and must **not** open PRs. Supports `--source-dir` for offline runs.
+- `scripts/apply_probe.py` records findings in `rsdenoise/fmriprep_spec.json` and writes `docs/fmriprep-compat-report.md` with a human review checklist — the release-watch PR is a proposal, not an auto-merge.
+- `scripts/generate_fixtures.py` writes an empty synthetic derivatives tree; `scripts/smoke_wiring.py` exercises the shared core's discovery/confounds wiring with full dependencies installed.
+- Synthetic fixtures go under `tests/fixtures/` (gitignored) and are regenerated by tests; do not commit them.
+
+## Prerequisites / portability
+- Install with `pip install -e .` (or `.[test]` / `.[legacy]`). Runtime deps: numpy, scipy, pandas, matplotlib, nibabel, nilearn, nipype, scikit-learn, seaborn, statsmodels (minimum versions in `pyproject.toml`). Verified locally on scipy 1.18 / current sklearn / current nilearn.
+- Queue mode also needs SGE (`qsub`/`qstat`) and FSL (`$FSLDIR`, `nipype.interfaces.fsl`); the archived AROMA helpers shell out to FSL tools.
+- Legacy APIs were already fixed in `legacy_helpers/`; the shared core avoids `scipy.ndimage.morphology` / `.filters` style imports. Expect further drift as fMRIPrep/nilearn evolve — that is what the release-watch workflow reports.
